@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Errand.Com - running errand without stress</title>
+<meta name="description" content="Live tracked errands platform. Domestic help, skilled trades, deliveries. Book instantly, track live, pay secure.">
+<meta name="theme-color" content="#FF6200">
+<link rel="manifest" href="data:application/manifest+json,{
+  \"name\": \"Errand.Com\",
+  \"short_name\": \"Errand\",
+  \"start_url\": \".\",
+  \"display\": \"standalone\",
+  \"background_color\": \"#f8fafc\",
+  \"theme_color\": \"#FF6200\",
+  \"icons\": [{
+    \"src\": \"images/IMG_6041.png\",
+    \"sizes\": \"192x192\",
+    \"type\": \"image/png\"
+  }]
+}">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        primary: '#FF6200',
+        secondary: '#003087'
+      }
+    }
+  }
+};
+
+// Chatbot
+let chatOpen = false;
+const responses = {
+  "hi": "Hello! Need domestic help, market run, or skilled trade in Uyo? 🚀",
+  "errand": "Post instantly! Live GPS tracking every 3s, secure escrow payments. 12% fee only.",
+  "runner": "247 verified runners (4.9★ avg). Happiness Okon available now for market runs!",
+  "tracking": "Live GPS every 3s. See demo above - production ready Socket.IO simulation.",
+  "price": "12% platform fee. Escrow secure. No upfront runner payment.",
+  "uyo": "Full coverage: Nwaniba Rd, Nung Ette, Shelter Afrique, Police Barracks.",
+  "how": "1. Post errand 2. Runner accepts 3. Live track 4. Arrives 5. Approve & pay",
+  "default": "I can help with errands, runners, pricing or Uyo coverage! What do you need?"
+};
+
+function toggleChat() {
+  chatOpen = !chatOpen;
+  const container = document.getElementById('chatbot-container');
+  const window = document.getElementById('chat-window');
+  container.style.display = chatOpen ? 'block' : 'none';
+  window.style.display = chatOpen ? 'flex' : 'none';
+  if (chatOpen) document.getElementById('chat-input').focus();
+}
+
+function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const msg = input.value.trim().toLowerCase();
+  if (!msg) return;
+  addMessage('You', msg);
+  input.value = '';
+  const key = Object.keys(responses).find(k => msg.includes(k)) || 'default';
+  setTimeout(() => addMessage('AI', responses[key]), 600);
+}
+
+function addMessage(sender, text) {
+  const messages = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = `flex ${sender === 'You' ? 'justify-end mb-4' : 'justify-start mb-4'}`;
+  div.innerHTML = `<div class="${sender === 'You' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-900 dark:bg-slate-700 dark:text-slate-200'} px-4 py-3 rounded-2xl max-w-[75%] text-sm shadow-md">${text}</div>`;
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelector('[onclick="toggleChat()"]').onclick = toggleChat;
+  document.querySelector('#chat-input').addEventListener('keypress', e => {
+    if (e.key === 'Enter') sendMessage();
+  });
+});
+</script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --primary: #FF6200;
+  --secondary: #003087;
+}
+
+.dark {
+  --glass: rgba(15,23,42,0.9);
+}
+
+* { box-sizing: border-box; }
+body { 
+  font-family: 'Inter', sans-serif; 
+  line-height: 1.6; 
+  overscroll-behavior: none;
+  scroll-behavior: smooth;
+  transition: background 0.3s ease;
+}
+#map { 
+  height: clamp(300px, 50vh, 600px); 
+  border-radius: 24px; 
+  box-shadow: 0 35px 60px -15px rgba(0, 0, 0, 0.3); 
+  transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+#map:hover { box-shadow: 0 45px 80px -20px rgba(255, 98, 0, 0.4); }
+.leaflet-container { 
+  border-radius: 24px !important; 
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+}
+.leaflet-popup-content-wrapper { 
+  border-radius: 20px !important; 
+  box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25) !important;
+}
+.leaflet-popup-tip { box-shadow: 0 10px 20px rgba(0,0,0,0.1) !important; }
+.worker-marker { 
+  font-size: clamp(24px, 5vw, 36px) !important; 
+  filter: drop-shadow(0 4px 12px rgba(0,0,0,0.4)); 
+  transition: transform 0.3s ease;
+}
+.worker-marker:hover { transform: scale(1.1) !important; animation: bounce 1s infinite; }
+@keyframes bounce { 0%, 20%, 50%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-10px); } 60% { transform: translateY(-5px); } }
+@keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 98, 0, 0.7); } 50% { box-shadow: 0 0 0 25px rgba(255, 98, 0, 0); } }
+.pulse-glow { animation: pulse-glow 2s infinite; }
+@keyframes fade-in-up { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-10px); } }
+@keyframes scale-in { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+.animate-fade-in-up { animation: fade-in-up 0.8s ease-out forwards; }
+.animate-float { animation: float 6s ease-in-out infinite; }
+.animate-scale-in { animation: scale-in 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
+.group:hover .group-hover\\:scale-110 { transform: scale(1.1); }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .max-w-7xl { max-width: 100%; padding-left: 1rem; padding-right: 1rem; }
+  #map { height: 40vh; border-radius: 16px; }
+  .xl\\:col-span-8 { grid-column: 1; }
+  .xl\\:col-span-4 { grid-column: 1; }
+  h1 { font-size: clamp(2.5rem, 8vw, 4rem) !important; line-height: 1.1; }
+  h2 { font-size: clamp(2rem, 7vw, 3rem) !important; }
+}
+
+/* Smooth scrollbars */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: rgba(255,255,255,0.1); border-radius: 10px; }
+::-webkit-scrollbar-thumb { background: linear-gradient(to bottom, var(--primary), var(--secondary)); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(to bottom, #ff7a30, #1a3bc8); }
+
+/* Button perfect hover */
+button { transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+button:hover { transform: translateY(-2px) scale(1.02); }
+
+/* Dark mode overrides */
+.dark {
+  color-scheme: dark;
+}
+.dark body {
+  background: linear-gradient(to-br, #111827 0%, #1f2937 50%, #374151 100%);
+}
+.dark [class*="bg-white"] { 
+  background: rgba(55, 65, 81, 0.95) !important;
+}
+.dark .text-gray-900 { color: #f9fafb !important; }
+.dark .text-gray-700, .dark .text-gray-600 { color: #d1d5db !important; }
+.dark .text-gray-800 { color: #e5e7eb !important; }
+.dark .border-blue-100 { border-color: rgba(100,116,139,0.3) !important; }
+.dark .bg-gradient-to-br.from-emerald-500.to-emerald-400 { 
+  background: linear-gradient(to-br, #059669, #047857) !important; 
+}
+.dark .bg-emerald-100 { background-color: rgba(6,78,59,0.2) !important; }
+.dark .bg-blue-100 { background-color: rgba(30,58,138,0.2) !important; }
+.dark .shadow-xl { filter: drop-shadow(0 25px 50px rgba(0,0,0,0.5)); }
+.dark #map { filter: brightness(1.05) contrast(1.1) hue-rotate(200deg); }
+.dark nav { background: rgba(15,23,42,0.95) !important; border-color: rgba(55,65,81,0.5); }
+.dark .bg-gradient-to-br\.from-primary\/20\.to-secondary\/20 { background: linear-gradient(to-br, rgba(255,98,0,0.3), rgba(0,58,135,0.3)); }
+</style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 via-blue-50/30 to-orange-50/50 min-h-screen antialiased dark:bg-gradient-to-br dark:from-slate-900 dark:via-slate-800 dark:to-gray-900">
+
+<nav class="backdrop-blur-xl bg-white/95 border-b border-blue-100/50 sticky top-0 z-50 shadow-sm dark:bg-slate-900/95 dark:border-slate-700/50">
+  <div class="max-w-7xl mx-auto px-6 py-4 lg:py-5">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-4">
+        <img src="images/IMG_6041.png" alt="Errand.Com" class="w-16 h-16 lg:w-20 lg:h-20 rounded-2xl shadow-xl object-contain bg-gradient-to-br from-white/80 to-blue-50/50 dark:from-slate-800/80 dark:to-slate-700/50 p-3 border border-orange-200">
+        <div>
+          <h1 class="text-2xl lg:text-3xl font-black bg-gradient-to-r from-primary via-orange-500 to-secondary bg-clip-text text-transparent drop-shadow-md">Errand.Com</h1>
+        </div>
+      </div>
+      <div class="hidden md:flex items-center gap-4">
+        <div class="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-primary/10 to-secondary/10 dark:from-primary/20 dark:to-secondary/20 rounded-2xl text-sm font-semibold text-primary border border-primary/20 animate-pulse-glow">
+          <div class="w-2.5 h-2.5 bg-gradient-to-r from-primary to-secondary rounded-full"></div>
+          LIVE TRACKING
+        </div>
+        <button id="darkToggle" class="p-3 bg-gray-100/80 dark:bg-slate-800/80 backdrop-blur-md rounded-2xl shadow-lg border border-gray-200 dark:border-slate-600 hover:shadow-xl hover:scale-105 transition-all duration-300 flex items-center gap-2 text-sm font-bold" title="Toggle Dark Mode">
+          <i class="fa-solid fa-sun text-yellow-500 text-lg block dark:hidden"></i>
+          <i class="fa-solid fa-moon text-slate-400 text-lg hidden dark:block"></i>
+          <span class="hidden sm:inline px-2 py-1 bg-white/50 dark:bg-slate-900/50 rounded-full text-xs">Dark</span>
+        </button>
+        <button class="px-8 py-3 bg-primary/90 hover:bg-primary text-white font-bold rounded-2xl shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-300 border border-primary/50 text-base">
+          Become Runner
+        </button>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <!-- Hero -->
+  <section class="max-w-7xl mx-auto px-6 py-28 lg:py-36 text-center relative overflow-hidden">
+    <div class="absolute inset-0 bg-gradient-to-br from-primary/3 via-secondary/2 to-blue-50/50 dark:from-primary/5 dark:to-slate-900/30"></div>
+    <div class="relative z-10 max-w-5xl mx-auto">
+      <h1 class="text-5xl lg:text-7xl xl:text-8xl font-black leading-[0.9] mb-8 bg-gradient-to-r from-primary via-orange-500 to-secondary bg-clip-text text-transparent drop-shadow-2xl animate-fade-in-up">
+        Your Errands,<br class="hidden lg:block">
+        <span class="block text-6xl lg:text-7xl xl:text-8xl">Tracked LIVE.</span><br>
+        <span class="text-4xl lg:text-5xl xl:text-6xl font-normal text-secondary block mt-4 animate-fade-in-up animation-delay-200">Done Right.</span>
+      </h1>
+      <p class="text-xl lg:text-2xl xl:text-3xl text-gray-700 dark:text-gray-300 mb-16 leading-relaxed max-w-3xl mx-auto opacity-95 animate-fade-in-up animation-delay-400">
+        Instant booking. GPS tracking every 3s. Escrow secure payments. Domestic, skilled trades, market runs – Uyo's most trusted platform.
+      </p>
+      <div class="flex flex-col lg:flex-row gap-6 justify-center items-center mb-24 animate-fade-in-up animation-delay-600">
+        <button class="group w-full lg:w-auto px-12 py-8 bg-gradient-to-r from-primary to-orange-500 text-white text-xl lg:text-2xl font-bold rounded-3xl shadow-2xl hover:shadow-3xl transform hover:-translate-y-3 transition-all duration-700 flex items-center justify-center gap-4 text-center">
+          <i class="fa-solid fa-mobile-retro text-2xl lg:text-3xl group-hover:scale-110 transition-transform duration-300"></i>
+          <span>Post Errand Now</span>
+        </button>
+        <button class="w-full lg:w-auto px-12 py-8 border-4 border-secondary text-secondary dark:text-slate-200 text-xl lg:text-2xl font-bold rounded-3xl hover:bg-secondary hover:text-white transition-all duration-500 shadow-xl hover:shadow-2xl transform hover:-translate-y-2 flex items-center justify-center gap-4">
+          <i class="fa-solid fa-hard-hat text-2xl lg:text-3xl"></i>
+          <span>Join Runners</span>
+        </button>
+      </div>
+      <!-- Trust Badges -->
+      <div class="flex flex-wrap justify-center gap-8 lg:gap-12 text-center animate-fade-in-up animation-delay-800">
+        <div class="bg-white/70 dark:bg-slate-800/70 backdrop-blur-md p-6 lg:p-8 rounded-3xl shadow-xl border border-blue-100 dark:border-slate-700 min-w-[200px]">
+          <div class="w-20 h-20 bg-gradient-to-br from-emerald-500 to-emerald-400 mx-auto mb-6 rounded-2xl flex items-center justify-center text-3xl shadow-2xl">
+            <i class="fa-solid fa-shield-check"></i>
+          </div>
+          <h4 class="text-xl lg:text-2xl font-bold text-gray-900 dark:text-white mb-3">100% Secure</h4>
+          <p class="text-gray-600 dark:text-gray-400 text-sm lg:text-base">Escrow + Verification</p>
+        </div>
+        <div class="bg-white/70 dark:bg-slate-800/70 backdrop-blur-md p-6 lg:p-8 rounded-3xl shadow-xl border border-blue-100 dark:border-slate-700 min-w-[200px]">
+          <div class="w-20 h-20 bg-gradient-to-br from-blue-500 to-blue-400 mx-auto mb-6 rounded-2xl flex items-center justify-center text-3xl shadow-2xl">
+            <i class="fa-solid fa-location-arrow"></i>
+          </div>
+          <h4 class="text-xl lg:text-2xl font-bold text-gray-900 dark:text-white mb-3">Live GPS</h4>
+          <p class="text-gray-600 dark:text-gray-400 text-sm lg:text-base">Every 3 Seconds</p>
+        </div>
+        <div class="bg-white/70 dark:bg-slate-800/70 backdrop-blur-md p-6 lg:p-8 rounded-3xl shadow-xl border border-blue-100 dark:border-slate-700 min-w-[200px]">
+          <div class="w-20 h-20 bg-gradient-to-br from-primary to-orange-500 mx-auto mb-6 rounded-2xl flex items-center justify-center text-3xl shadow-2xl">
+            <i class="fa-solid fa-wallet"></i>
+          </div>
+          <h4 class="text-xl lg:text-2xl font-bold text-gray-900 dark:text-white mb-3">Trusted Payments</h4>
+          <p class="text-gray-600 dark:text-gray-400 text-sm lg:text-base">12% Fee Only</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Live Demo -->
+  <section class="relative">
+    <div class="absolute inset-0 bg-gradient-to-b from-slate-50 to-blue-50/50 dark:from-slate-900 to-slate-800/50 -skew-y-3 origin-top-left"></div>
+    <div class="relative max-w-7xl mx-auto px-6 py-32">
+      <div class="text-center mb-24">
+        <h2 class="text-5xl lg:text-6xl xl:text-7xl font-black mb-8 bg-gradient-to-r from-secondary via-primary to-orange-600 bg-clip-text text-transparent drop-shadow-2xl animate-float">
+          Live Tracking<br><span class="text-4xl lg:text-5xl xl:text-6xl font-normal text-primary block -mt-4"></span>
+        </h2>
+        <p class="text-xl lg:text-2xl xl:text-3xl text-gray-700 dark:text-gray-300 max-w-4xl mx-auto mb-16 opacity-90 leading-relaxed animate-fade-in">
+          Watch Happiness Okon (4.9★) complete real-time delivery from Nung Ette to Nwaniba Road. Production GPS experience.
+        </p>
+      </div>
+      
+      <div class="grid xl:grid-cols-12 gap-12 lg:gap-16 items-start">
+        <!-- Map -->
+        <div class="xl:col-span-8 order-2 xl:order-1">
+          <div class="group relative">
+            <div id="map" class="shadow-3xl border-8 border-white/60 dark:border-slate-800/60 shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)] rounded-[32px] overflow-hidden hover:shadow-[0_45px_80px_-20px_rgba(255,98,0,0.3)] transition-all duration-700 dark:shadow-[0_35px_60px_-15px_rgba(0,0,0,0.6)]"></div>
+            <div class="absolute -top-6 -right-6 w-32 h-32 bg-gradient-to-br from-primary/20 to-secondary/20 dark:from-primary/30 dark:to-secondary/30 rounded-3xl border-4 border-white dark:border-slate-800 shadow-2xl flex items-center justify-center text-4xl opacity-80 animate-pulse-glow z-10 group-hover:scale-105 transition-all duration-500 pointer-events-none">
+              <i class="fa-solid fa-map-location-dot text-primary drop-shadow-lg"></i>
+            </div>
+            <!-- Live indicator -->
+            <div class="absolute top-8 left-8 bg-white/95 dark:bg-slate-800/95 backdrop-blur-md px-6 py-3 rounded-3xl shadow-2xl border border-green-200 dark:border-emerald-800 z-20 animate-pulse-glow">
+              <div class="flex items-center gap-3 text-sm font-bold text-emerald-700 dark:text-emerald-400">
+                <div class="w-3 h-3 bg-emerald-500 rounded-full animate-ping"></div>
+                LIVE · 2m 43s ago
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Runner Panel -->
+        <div class="xl:col-span-4 order-1 xl:order-2">
+          <!-- Profile Card -->
+          <div class="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-[35px] shadow-2xl border border-blue-100/50 dark:border-slate-700/50 p-10 mb-10 hover:shadow-3xl transition-all duration-500 hover:-translate-y-2">
+            <div class="flex items-start gap-2 mb-5">
+              <div class="flex-shrink-0">
+                <img src="images/IMG_6038.jpeg" alt="Happiness Okon" class="w-24 h-24 rounded-[24px] object-cover shadow-2xl border-4 border-white dark:border-slate-800 ring-4 ring-primary/20 dark:ring-slate-900/50 hover:scale-110 transition-all duration-300 cursor-pointer" loading="lazy">
+              </div>
+              <div class="flex-1 min-w-0">
+                <h3 class="text-3xl font-black text-gray-900 dark:text-white mb-3 leading-tight">Happiness Okon</h3>
+                <div class="flex items-center gap-4 mb-4">
+                  <div class="bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200 px-4 py-2 rounded-2xl text-sm font-bold flex items-center gap-2 shadow-md">
+                    <i class="fa-solid fa-star text-emerald-500 text-lg"></i>
+                    4.9 (247)
+                  </div>
+                  <div class="bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 px-4 py-2 rounded-2xl text-sm font-bold flex items-center gap-2 shadow-md">
+                    <i class="fa-solid fa-badge-check text-blue-500 text-lg"></i>
+                    Verified Runner
+                  </div>
+                </div>
+                <div class="text-sm text-gray-600 dark:text-gray-400 font-semibold">
+                  Multi-Service Pro · Available Now
+                </div>
+              </div>
+            </div>
+
+            <!-- Job Details -->
+            <div class="space-y-6 divide-y divide-gray-100 dark:divide-slate-700">
+              <div class="pt-6">
+                <div class="flex justify-between items-center py-4">
+                  <span class="text-gray-600 dark:text-gray-400 font-semibold">Service</span>
+                  <span class="font-black text-xl text-gray-900 dark:text-white">Market Run + Delivery</span>
+                </div>
+                <div class="flex justify-between items-center py-4">
+                  <span class="text-gray-600 dark:text-gray-400 font-semibold">From</span>
+                  <span class="font-bold text-lg text-gray-900 dark:text-white">Nung Ette, Uyo</span>
+                </div>
+                <div class="flex justify-between items-center py-4">
+                  <span class="text-gray-600 dark:text-gray-400 font-semibold">To</span>
+                  <span class="font-black text-xl text-primary">Nwaniba Road, Uyo</span>
+                </div>
+                <div class="flex justify-between items-center p-8 bg-gradient-to-r from-primary/5 to-secondary/10 dark:from-primary/20 dark:to-secondary/20 rounded-3xl border border-primary/20 shadow-inner">
+                  <span class="text-2xl font-black text-gray-800 dark:text-slate-200 tracking-tight">ETA</span>
+                  <span id="eta" class="text-4xl font-black text-primary drop-shadow-2xl animate-pulse">3 min</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Control -->
+            <div class="pt-12">
+              <button onclick="toggleSimulation()" id="simulateBtn" class="w-full bg-gradient-to-r from-primary to-orange-500 hover:from-primary/95 hover:to-orange-400 text-white py-6 px-8 rounded-3xl font-black text-xl shadow-2xl hover:shadow-3xl transform hover:-translate-y-2 transition-all duration-500 relative overflow-hidden group">
+                <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -skew-x-12 transform -translate-x-full group-hover:translate-x-full transition-transform duration-700 opacity-0 group-hover:opacity-100"></div>
+                <div class="relative flex items-center justify-center gap-4">
+                  <i class="fa-solid fa-play text-2xl group-hover:scale-110 transition-transform duration-300"></i>
+                  <span id="btnText">Start Live Demo</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Features -->
+          <div class="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-[32px] shadow-2xl border border-blue-100/50 dark:border-slate-700/50 p-8">
+            <h4 class="text-2xl font-black text-gray-900 dark:text-white mb-8 flex items-center gap-4">
+              <i class="fa-solid fa-rocket text-primary text-2xl"></i>
+              Production Ready
+            </h4>
+            <div class="space-y-4 text-sm text-gray-700 dark:text-gray-300">
+              <div class="flex items-start gap-3 p-3 bg-gradient-to-r from-emerald-50 to-emerald-100 dark:from-emerald-900/30 dark:to-emerald-800/30 rounded-2xl">
+                <div class="w-6 h-6 bg-emerald-500 rounded-lg flex items-center justify-center mt-0.5 flex-shrink-0">
+                  <i class="fa-solid fa-check text-white text-xs"></i>
+                </div>
+                <span>Leaflet Maps + Real GPS Polylines</span>
+              </div>
+              <div class="flex items-start gap-3 p-3 bg-gradient-to-r from-emerald-50 to-emerald-100 dark:from-emerald-900/30 dark:to-emerald-800/30 rounded-2xl">
+                <div class="w-6 h-6 bg-emerald-500 rounded-lg flex items-center justify-center mt-0.5 flex-shrink-0">
+                  <i class="fa-solid fa-check text-white text-xs"></i>
+                </div>
+                <span>Socket.IO Production Simulation (2.5s)</span>
+              </div>
+              <div class="flex items-start gap-3 p-3 bg-gradient-to-r from-emerald-50 to-emerald-100 dark:from-emerald-900/30 dark:to-emerald-800/30 rounded-2xl">
+                <div class="w-6 h-6 bg-emerald-500 rounded-lg flex items-center justify-center mt-0.5 flex-shrink-0">
+                  <i class="fa-solid fa-check text-white text-xs"></i>
+                </div>
+                <span>PWA Installable + Offline Cache</span>
+              </div>
+              <div class="flex items-start gap-3 p-3 bg-gradient-to-r from-emerald-50 to-emerald-100 dark:from-emerald-900/30 dark:to-emerald-800/30 rounded-2xl">
+                <div class="w-6 h-6 bg-emerald-500 rounded-lg flex items-center justify-center mt-0.5 flex-shrink-0">
+                  <i class="fa-solid fa-check text-white text-xs"></i>
+                </div>
+                <span>Flutter/NestJS Backend Ready</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Services Grid -->
+<section class="py-32 -mt-24 bg-gradient-to-b from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800">
+  <div class="max-w-7xl mx-auto px-6">
+    <div class="text-center mb-28">
+      <h2 class="text-5xl lg:text-6xl xl:text-7xl font-black mb-8 bg-gradient-to-r from-secondary via-primary to-orange-500 bg-clip-text text-transparent drop-shadow-xl">Uyo Services Live</h2>
+      <p class="text-xl lg:text-2xl xl:text-3xl text-gray-600 dark:text-gray-400 max-w-3xl mx-auto leading-relaxed opacity-90">
+        Domestic help to skilled trades – all with live GPS tracking
+      </p>
+    </div>
+    <div class="grid md:grid-cols-3 gap-10 lg:gap-12">
+      <!-- Domestic -->
+      <div class="group hover:scale-105 transition-all duration-700 hover:shadow-3xl">
+        <div class="bg-white/80 dark:bg-slate-800/80 backdrop-blur-md rounded-[32px] p-12 border border-blue-100 dark:border-slate-700 shadow-2xl hover:bg-gradient-to-br hover:from-emerald-50 hover:to-emerald-100 dark:hover:from-emerald-900/30 dark:hover:to-emerald-800/30">
+          <div class="w-28 h-28 bg-gradient-to-br from-emerald-400 to-emerald-500 rounded-[24px] flex items-center justify-center mx-auto mb-10 text-4xl shadow-2xl group-hover:rotate-12 transition-all duration-700 group-hover:scale-110">
+            <i class="fa-solid fa-broom"></i>
+          </div>
+          <h3 class="text-3xl lg:text-3.5xl font-black text-gray-900 dark:text-white mb-6 text-center group-hover:text-emerald-600 transition-colors">Domestic Help</h3>
+          <p class="text-lg lg:text-xl text-gray-700 dark:text-gray-300 font-medium leading-relaxed text-center opacity-95">
+            Cleaning, laundry, cooking, gardening. Live tracked house help with ETA.
+          </p>
+        </div>
+      </div>
+      
+      <!-- Skilled -->
+      <div class="group hover:scale-105 transition-all duration-700 hover:shadow-3xl">
+        <div class="bg-white/80 dark:bg-slate-800/80 backdrop-blur-md rounded-[32px] p-12 border border-blue-100 dark:border-slate-700 shadow-2xl hover:bg-gradient-to-br hover:from-blue-50 hover:to-blue-100 dark:hover:from-blue-900/30 dark:hover:to-blue-800/30">
+          <div class="w-28 h-28 bg-gradient-to-br from-blue-400 to-blue-500 rounded-[24px] flex items-center justify-center mx-auto mb-10 text-4xl shadow-2xl group-hover:rotate-12 transition-all duration-700 group-hover:scale-110">
+            <i class="fa-solid fa-screwdriver-wrench"></i>
+          </div>
+          <h3 class="text-3xl lg:text-3.5xl font-black text-gray-900 dark:text-white mb-6 text-center group-hover:text-blue-600 transition-colors">Skilled Trades</h3>
+          <p class="text-lg lg:text-xl text-gray-700 dark:text-gray-300 font-medium leading-relaxed text-center opacity-95">
+            Plumber, electrician, AC, barber, beauty. Verified pros, live location.
+          </p>
+        </div>
+      </div>
+      
+      <!-- Errands -->
+      <div class="group hover:scale-105 transition-all duration-700 hover:shadow-3xl">
+        <div class="bg-white/80 dark:bg-slate-800/80 backdrop-blur-md rounded-[32px] p-12 border border-blue-100 dark:border-slate-700 shadow-2xl hover:bg-gradient-to-br hover:from-orange-50 hover:to-orange-100 dark:hover:from-orange-900/30 dark:hover:to-orange-800/30">
+          <div class="w-28 h-28 bg-gradient-to-br from-primary to-orange-500 rounded-[24px] flex items-center justify-center mx-auto mb-10 text-4xl shadow-2xl group-hover:rotate-12 transition-all duration-700 group-hover:scale-110">
+            <i class="fa-solid fa-shopping-bags"></i>
+          </div>
+          <h3 class="text-3xl lg:text-3.5xl font-black text-gray-900 dark:text-white mb-6 text-center group-hover:text-primary transition-colors">Errands & Delivery</h3>
+          <p class="text-lg lg:text-xl text-gray-700 dark:text-gray-300 font-medium leading-relaxed text-center opacity-95">
+            Market shopping, document pickup, package delivery. Track every step.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Final CTA -->
+<footer class="bg-gradient-to-tr from-secondary via-primary to-orange-500 text-white py-32 relative overflow-hidden">
+  <div class="absolute inset-0 bg-[radial-gradient(circle_at_20%_80%,rgba(255,255,255,0.1),transparent),radial-gradient(circle_at_80%_20%,rgba(120,119,198,0.1),transparent)]"></div>
+  <div class="max-w-7xl mx-auto px-6 relative z-10 text-center">
+    <h2 class="text-6xl lg:text-7xl xl:text-8xl font-black mb-12 bg-gradient-to-r from-white via-orange-100 to-yellow-100 bg-clip-text text-transparent drop-shadow-2xl leading-tight">
+      Uyo Launch<br>
+      <span class="text-5xl lg:text-6xl xl:text-7xl block font-normal text-orange-100">Coming Soon</span>
+    </h2>
+    <p class="text-2xl lg:text-3xl mb-16 opacity-95 max-w-4xl mx-auto leading-relaxed">
+      Phase 1 MVP: Flutter apps + NestJS backend. Trusted by estates, churches, WhatsApp groups.
+    </p>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto mb-20">
+      <div class="bg-white/10 dark:bg-slate-900/50 backdrop-blur-md rounded-3xl p-8 border border-white/20 dark:border-slate-700/50 hover:bg-white/20 dark:hover:bg-slate-800/30 transition-all duration-500">
+        <i class="fa-solid fa-map-location-dot text-4xl text-orange-200 mb-6 block mx-auto"></i>
+        <h4 class="text-2xl font-bold mb-4 text-white drop-shadow-lg">Uyo Coverage</h4>
+        <p class="text-lg opacity-90">Nwaniba, Nung Ette, Shelter Afrique, Police Barracks</p>
+      </div>
+      <div class="bg-white/10 dark:bg-slate-900/50 backdrop-blur-md rounded-3xl p-8 border border-white/20 dark:border-slate-700/50 hover:bg-white/20 dark:hover:bg-slate-800/30 transition-all duration-500">
+        <i class="fa-solid fa-users text-4xl text-orange-200 mb-6 block mx-auto"></i>
+        <h4 class="text-2xl font-bold mb-4 text-white drop-shadow-lg">Verified Network</h4>
+        <p class="text-lg opacity-90">247 runners, 4.9 avg rating, background checked</p>
+      </div>
+      <div class="bg-white/10 dark:bg-slate-900/50 backdrop-blur-md rounded-3xl p-8 border border-white/20 dark:border-slate-700/50 hover:bg-white/20 dark:hover:bg-slate-800/30 transition-all duration-500">
+        <i class="fa-solid fa-lock text-4xl text-orange-200 mb-6 block mx-auto"></i>
+        <h4 class="text-2xl font-bold mb-4 text-white drop-shadow-lg">Secure Platform</h4>
+        <p class="text-lg opacity-90">Escrow payments, live tracking, dispute resolution</p>
+      </div>
+    </div>
+    <button class="inline-flex items-center gap-4 px-12 py-8 bg-white/20 dark:bg-slate-200/20 backdrop-blur-md hover:bg-white/30 dark:hover:bg-slate-200/40 text-xl lg:text-2xl font-black text-white rounded-3xl shadow-2xl hover:shadow-3xl transform hover:-translate-y-2 transition-all duration-500 border-2 border-white/30 group">
+      <i class="fa-solid fa-bell text-2xl group-hover:animate-ring"></i>
+      <span>Get Launch Alerts</span>
+      <div class="w-3 h-3 bg-gradient-to-r from-emerald-400 to-emerald-500 rounded-full animate-ping absolute -top-2 -right-2 group-hover:opacity-100 opacity-0 transition-opacity"></div>
+    </button>
+    <div class="border-t border-white/20 pt-16 mt-20">
+      <p class="text-lg opacity-80 mb-8">© 2026 Errand.Com – Nigeria's Errands Infrastructure</p>
+      <div class="flex flex-wrap justify-center gap-8 text-lg opacity-80">
+        <a href="#" class="hover:text-orange-300 transition-all duration-300">Privacy</a>
+        <a href="#" class="hover:text-orange-300 transition-all duration-300">Terms</a>
+        <a href="#" class="hover:text-orange-300 transition-all duration-300">Contact Uyo Team</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// Production Uyo GPS demo
+const uyoCenter = [5.031, 7.92];
+
+const clientLoc = [5.037, 7.925]; // Nwaniba
+const workerStart = [5.025, 7.915]; // Nung Ette
+
+const map = L.map('map').setView(uyoCenter, 14);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+
+const clientIcon = L.divIcon({
+  html: '<div class="w-14 h-14 bg-gradient-to-br from-orange-500 to-primary rounded-full border-6 border-white shadow-2xl flex items-center justify-center text-lg font-bold text-white dark:border-slate-800 dark:shadow-slate-900/50">👤</div>',
+  iconSize: [56, 56],
+  iconAnchor: [28, 28],
+  className: 'client-marker'
+});
+
+const clientMarker = L.marker(clientLoc, {icon: clientIcon}).addTo(map)
+  .bindPopup(`
+    <div class="p-6 min-w-[320px] rounded-2xl shadow-2xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700">
+      <h3 class="font-black text-2xl text-gray-900 dark:text-white mb-3">Client Location</h3>
+      <p class="text-lg text-gray-700 dark:text-gray-300 mb-4 font-semibold">Nwaniba Road, Uyo</p>
+      <div class="flex items-center gap-3 text-emerald-600 dark:text-emerald-400 font-bold text-sm">
+        <i class="fa-solid fa-clock text-lg"></i>
+        Job posted <span class="animate-pulse">18min</span> ago
+      </div>
+    </div>
+  `, { className: 'custom-popup' }).openPopup();
+
+let workerMarker = L.marker(workerStart, {
+  icon: L.divIcon({
+    html: '<div class="w-16 h-16 bg-gradient-to-br from-blue-500 to-primary rounded-full border-8 border-white shadow-3xl flex items-center justify-center animate-bounce-slow dark:border-slate-800"><i class="fa-solid fa-hard-hat text-white text-xl font-bold"></i></div>',
+    iconSize: [64, 64],
+    iconAnchor: [32, 64],
+    className: 'worker-marker'
+  })
+}).addTo(map);
+
+let routeLine = null;
+const routePoints = [
+  workerStart, // Nung Ette start
+  [5.028, 7.918],
+  [5.031, 7.921],
+  [5.034, 7.923],
+  clientLoc // Nwaniba end
+];
+
+let currentIndex = 0;
+let isSimulating = false;
+let simInterval = null;
+
+// Socket.IO simulation
+const socket = {
+  listeners: {},
+  emit(event, data) {
+    if (this.listeners[event]) this.listeners[event](data);
+  },
+  on(event, cb) { this.listeners[event] = cb; }
+};
+
+function simulateUpdate() {
+  if (currentIndex >= routePoints.length) {
+    isSimulating = false;
+    document.getElementById('btnText').innerHTML = '<i class="fa-solid fa-play mr-3"></i>Re-run Demo';
+    document.getElementById('simulateBtn').onclick = toggleSimulation;
+    return;
+  }
+
+  const pos = routePoints[currentIndex];
+  socket.emit('location_update', {
+    lat: pos[0],
+    lng: pos[1],
+    speed: 22,
+    heading: 45,
+    eta: routePoints.length - currentIndex
+  });
+  currentIndex++;
+}
+
+socket.on('location_update', data => {
+  workerMarker.setLatLng([data.lat, data.lng]);
+  
+  if (routeLine) map.removeLayer(routeLine);
+  routeLine = L.polyline(routePoints.slice(0, currentIndex + 1), {
+    color: '#FF6200',
+    weight: 8,
+    opacity: 1,
+    dashArray: '10, 5'
+  }).addTo(map).bringToFront();
+  
+  document.getElementById('eta').textContent = `${data.eta} min`;
+  
+  map.flyTo([data.lat, data.lng], 15, { duration: 1.2, animate: true });
+});
+
+function toggleSimulation() {
+  const btn = document.getElementById('simulateBtn');
+  
+  if (!isSimulating) {
+    isSimulating = true;
+    currentIndex = 0;
+    btn.disabled = true;
+    btn.innerHTML = '<div class="inline-block w-6 h-6 border-4 border-white/30 border-t-white rounded-full animate-spin mr-3"></div><span>Live GPS...</span>';
+    btn.classList.add('bg-emerald-600/90', 'cursor-not-allowed');
+    simInterval = setInterval(simulateUpdate, 2500);
+    simulateUpdate();
+  } else {
+    clearInterval(simInterval);
+    isSimulating = false;
+    btn.disabled = false;
+    btn.innerHTML = '<div class="relative flex items-center justify-center gap-4"><i class="fa-solid fa-play text-2xl"></i><span id="btnText">Re-run Demo</span></div>';
+    btn.classList.remove('bg-emerald-600/90', 'cursor-not-allowed');
+  }
+}
+
+// Dark mode toggle
+let isDark = localStorage.getItem('darkMode') === 'true' || (!localStorage.getItem('darkMode') && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+if (isDark) document.documentElement.classList.add('dark');
+
+function toggleDark() {
+  document.documentElement.classList.toggle('dark');
+  isDark = document.documentElement.classList.contains('dark');
+  localStorage.setItem('darkMode', isDark);
+  const sunIcon = document.querySelector('#darkToggle .fa-sun');
+  const moonIcon = document.querySelector('#darkToggle .fa-moon');
+  const span = document.querySelector('#darkToggle span');
+  if (sunIcon) sunIcon.classList.toggle('hidden', isDark);
+  if (moonIcon) moonIcon.classList.toggle('hidden', !isDark);
+  if (span) span.textContent = isDark ? 'Light' : 'Dark';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const toggleBtn = document.getElementById('darkToggle');
+  if (toggleBtn) {
+    toggleBtn.onclick = toggleDark;
+    toggleDark(); // Update icons for initial state
+  }
+});
+</script>
+</body>
+</html>
